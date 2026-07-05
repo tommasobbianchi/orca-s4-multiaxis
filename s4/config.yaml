@@ -1,0 +1,33 @@
+# S4_Slicer default parameters
+# These match Joshua Bird's notebook defaults.
+
+# --- Stage A: mesh deformation ---
+deform:
+  MAX_OVERHANG: 30                # maximum overhang angle in degrees
+  ROTATION_MULTIPLIER: 2          # larger = more aggressive rotation
+  NEIGHBOUR_LOSS_WEIGHT: 20       # larger = smoother rotation field
+  MAX_POS_ROTATION: 3600          # degrees, clipped internally
+  MAX_NEG_ROTATION: -3600
+  STEEP_OVERHANG_COMPENSATION: true
+  SET_INITIAL_ROTATION_TO_ZERO: false
+  INITIAL_ROTATION_FIELD_SMOOTHING: 30
+  rotation_iterations: 100        # least_squares max_nfev for rotation opt
+  deformation_iterations: 1000    # least_squares max_nfev for deformation opt
+  part_offset: [0, 0, 0]
+  save_gif: false
+
+# --- Stage C: gcode inverse-transform ---
+transform:
+  SEG_SIZE: 0.6                   # mm, re-segment moves to this length
+  MAX_ROTATION: 30                # degrees, max tilt in gcode output
+  MIN_ROTATION: -130              # degrees, min tilt in gcode output
+  NOZZLE_OFFSET: 42               # mm, nozzle tip-to-pivot distance
+  ROTATION_AVERAGING_ALPHA: 0.2   # EMA smoothing on rotation
+  ROTATION_MAX_DELTA: 1           # degrees, insert intermediate points if tilt delta > this
+  RETRACTION_LENGTH: 1.0          # mm
+  MAX_EXTRUSION_MULTIPLIER: 10
+  kinematics: "rtheta"            # "rtheta" or "cartesian_b"
+
+# --- Stage B: external slicer (for the NEXT task) ---
+orca_binary: "/home/tommaso/projects/orca-cad-primitives/build/Snapmaker_Orca_Linux_V2.3.4.AppImage"
+orca_config: ""                   # placeholder, set in the next task

@@ -1,0 +1,10 @@
+numpy
+scipy
+networkx
+pyvista
+tetgen
+open3d
+pygcode
+pyyaml
+watchdog
+pytest
