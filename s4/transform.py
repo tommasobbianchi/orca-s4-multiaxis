@@ -20,6 +20,15 @@ class TransformParams:
     RETRACTION_LENGTH: float = 1.0
     MAX_EXTRUSION_MULTIPLIER: float = 10
     kinematics: str = "rtheta"
+    # Klipper feed model (kinematics="klipper"): F = weighted move length /
+    # planar time, in mm/min (no G93). Klipper's own metric treats deg as mm
+    # 1:1, so weight 1.0 preserves the planar move time exactly (extrusion-safe);
+    # weight < 1 slows rotary-heavy moves relative to that metric.
+    # ponytail: 1:1 default; tune per-axis only if rotary speed surges. The hard
+    # velocity ceiling lives firmware-side (Klipper max_velocity / per-stepper).
+    FEED_WEIGHT_C: float = 1.0
+    FEED_WEIGHT_B: float = 1.0
+    TRAVEL_FEED: float = 20000.0  # mm/min fallback when move time is undefined
 
 
 # --- pure-math helpers (numpy/scipy only, unit-testable) ---------------------
@@ -73,6 +82,17 @@ def cartesian_to_rtheta(x, y, z, tilt_rad, prev_raw_theta, theta_accum, nozzle_o
         delta_theta += 2 * np.pi
 
     return raw_theta, theta_accum + delta_theta, r, z_adj
+
+
+def klipper_feed(d_x, d_z, d_c_deg, d_b_deg, inv_time_feed, w_c, w_b, travel_feed):
+    """Plain mm/min F for Klipper (no G93), over its Euclidean metric where deg
+    is treated as mm 1:1. inv_time_feed = 1/planar_time, so F = weighted move
+    length * inv_time_feed keeps the move's planar time when weights are 1.0
+    (extrusion-safe). Falls back to travel_feed when time is undefined."""
+    length = np.sqrt(d_x**2 + d_z**2 + (w_c * d_c_deg) ** 2 + (w_b * d_b_deg) ** 2)
+    if inv_time_feed is not None and length > 0:
+        return length * inv_time_feed
+    return travel_feed
 
 
 def format_gcode_line(theta_deg, r, z, tilt_deg, e, inv_time_feed, kinematics="rtheta"):
@@ -390,7 +410,10 @@ def transform_gcode(planar_gcode_path, deformed_tet, fields, params=None):
     prev_raw_theta = 0.0
     theta_accum = 0.0
     prev_z = 20.0
+    prev_theta_deg = 0.0
+    prev_tilt_deg = 0.0
     noz = params.NOZZLE_OFFSET
+    is_klipper = params.kinematics == "klipper"
 
     lines.append("G94 ; mm/min feed")
     lines.append("G28 ; home")
@@ -399,7 +422,8 @@ def transform_gcode(planar_gcode_path, deformed_tet, fields, params=None):
     lines.append("G94 ; mm/min feed")
     lines.append("G90 ; absolute positioning")
     lines.append(f"G0 C{theta_accum} X{prev_r} Z{prev_z} B0 ; go to start")
-    lines.append("G93 ; inverse time feed")
+    if not is_klipper:
+        lines.append("G93 ; inverse time feed")
 
     for point in new_gcode_points:
         position = point["position"]
@@ -422,23 +446,42 @@ def transform_gcode(planar_gcode_path, deformed_tet, fields, params=None):
         e_val = point.get("extrusion")
         inv_feed = point.get("inv_time_feed")
 
-        s = format_gcode_line(
-            theta_deg, r_val, z_val, tilt_deg, e_val, inv_feed, params.kinematics
-        )
-        s = s.replace("G01", point["command"])
-
-        no_feed_value = inv_feed is None
-        if no_feed_value:
-            lines.append("G94")
-            if inv_feed is None:
-                s += " F20000"
+        if is_klipper:
+            f_val = klipper_feed(
+                r_val - prev_r,
+                z_val - prev_z,
+                theta_deg - prev_theta_deg,
+                tilt_deg - prev_tilt_deg,
+                inv_feed,
+                params.FEED_WEIGHT_C,
+                params.FEED_WEIGHT_B,
+                params.TRAVEL_FEED,
+            )
+            s = format_gcode_line(
+                theta_deg, r_val, z_val, tilt_deg, e_val, f_val, params.kinematics
+            )
+            s = s.replace("G01", point["command"])
             lines.append(s)
-            lines.append("G93")
         else:
-            lines.append(s)
+            s = format_gcode_line(
+                theta_deg, r_val, z_val, tilt_deg, e_val, inv_feed, params.kinematics
+            )
+            s = s.replace("G01", point["command"])
+
+            no_feed_value = inv_feed is None
+            if no_feed_value:
+                lines.append("G94")
+                if inv_feed is None:
+                    s += " F20000"
+                lines.append(s)
+                lines.append("G93")
+            else:
+                lines.append(s)
 
         prev_r = r_val
         prev_z = z_val
+        prev_theta_deg = theta_deg
+        prev_tilt_deg = tilt_deg
 
     return lines
 

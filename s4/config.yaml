@@ -26,7 +26,11 @@ transform:
   ROTATION_MAX_DELTA: 1           # degrees, insert intermediate points if tilt delta > this
   RETRACTION_LENGTH: 1.0          # mm
   MAX_EXTRUSION_MULTIPLIER: 10
-  kinematics: "rtheta"            # "rtheta" or "cartesian_b"
+  kinematics: "rtheta"            # "rtheta" (RRF, G93) | "klipper" (mm/min F) | "cartesian_b"
+  # Klipper feed weights (only used when kinematics: "klipper"); 1.0 = preserve planar time
+  # FEED_WEIGHT_C: 1.0
+  # FEED_WEIGHT_B: 1.0
+  # TRAVEL_FEED: 20000.0
 
 # --- Stage B: external slicer ---
 # Native OrcaSlicer 2.4.0-dev binary (no AppImage/FUSE); full profile tree lives

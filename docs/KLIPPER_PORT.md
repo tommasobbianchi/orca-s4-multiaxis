@@ -7,9 +7,11 @@ currently RepRapFirmware. Goal: run the S4 pipeline's 4-axis output on **Klipper
 
 - Klipper's motion core is **hardcoded to 3 axes** (C code: `trapq.c`, iterative
   solver). A 4th/5th coordinated axis is not a config change.
-- The only maintained multi-axis base is [`naikymen/klipper-for-cnc`](https://github.com/naikymen/klipper-for-cnc)
-  (`cartesian_abc` kinematics: coordinated `XYZABC`). It treats extra axes as
-  **independent linear** axes and has **no G93** (F is shared, Euclidean).
+- Base fork: [`gear2nd-droid/klipper`](https://github.com/gear2nd-droid/klipper)
+  `6axes_support` — already extends the motion core past 3 axes and ships C
+  kinematics for rotary/tilt axes. No G93 in it either (F shared, Euclidean).
+  ([`naikymen/klipper-for-cnc`](https://github.com/naikymen/klipper-for-cnc) is
+  the simpler fallback.)
 - Therefore the coupling (X/B CoreXY pair) and the feedrate model move **into
   Stage C of this slicer, which we own** — the hard kinematics unknown becomes
   tunable Python instead of C.
@@ -86,20 +88,54 @@ become the two core motors instead.)
 
 ## Phases
 
-### Phase 0 — Derive & validate the kinematics (BLOCKING, highest risk)
-- Derive the core-pair coupling: `(motor_a, motor_b) ↔ (radial, tilt)` from the
-  belt routing + 16T/40T pulley ratios, **cross-checked** against his `M669 K0`
-  matrix (`X-1:0:0:1:0`, `B0.222…:0:0:0.222…`) and steps/mm.
-- Validate numerically against ≥3 known poses (e.g. B-home = nozzle down; pure
-  radial move = no tilt). A wrong matrix = a machine that moves wrong.
-- Settle D1 (motor-space vs coupled kinematic).
-- Deliverable: forward+inverse equations + a `test_kinematics` self-check.
+### Phase 0 — Derive & validate the kinematics ✅ DONE
+Decoded directly from his `M669 K0` matrix (authoritative — his machine prints
+with it), column order `[X, Y, Z, B, C]`:
 
-### Phase 1 — Stage C Klipper output mode (slicer, we own this)
-- Add `kinematics: "klipper_core_rtheta"` to `s4/transform.py`: apply the D1
-  transform, emit plain-F `mm/min` moves (D2), drop G93.
-- Reuse the existing 42 mm nozzle-offset comp, tilt clamp, C accumulation.
-- Unit tests for the transform + feed conversion.
+```
+mC = C            (identity, drive0, 88.889 st/mm)
+mZ = Z            (identity, drive4, 400 st/mm)
+m1 = -X + B       (coupled, drive1, 100 st/mm)     radial-motor
+m2 = K·(X + B)    (coupled, drive2, 100 st/mm)     tilt-motor,  K = 2/9 = 1/4.5
+```
+X in mm, B in deg. Only the X/B pair is coupled; det = −0.4444 (invertible).
+The `1/4.5` is the tilt reduction (16T→72T stage; the earlier "16T/40T" note was
+incomplete — the matrix supersedes it). Cross-checked against his homing moves:
+`homex.g X300`→(−300, +66.67), `homeb.g B1000`→(+1000, +222.2), both motors move
+on either logical home = correct coupled-pair behavior.
+
+**Reference impl + self-check:** `s4/kinematics_rtheta.py` (`forward`/`inverse`,
+5 round-trip poses + 2 homing fixtures, `python3 -m` runnable). PASS.
+
+**D1 SETTLED → Option B (coupled kinematic in Klipper; logical axes X=radial,
+B=tilt).** His RRF homing is already expressed as *logical-axis* sensorless
+moves (`G1 H1 X300`, `G1 H1 B1000`), so keeping logical axes maps homing 1:1.
+The decisive win: **Stage C stays logical R-θ (unchanged); only the feedrate
+model changes (drop G93).** Option A would push motor-space math into Stage C
+*and* still need custom homing macros.
+
+Full machine ground truth now in `reprap firmware config/` of the cloned
+`Core-R-Theta-4-Axis-Printer` repo (config.g, to4axis.g, homex/homeb/homez/homec.g).
+
+### Phase 1 — Stage C Klipper output mode (slicer, we own this) ✅ DONE
+Added `kinematics: "klipper"` to `s4/transform.py`. Because D1=Option B keeps
+logical axes, Stage C emits the **same** `C/X/Z/B` R-θ letters as `rtheta` — the
+only changes vs `rtheta` are:
+- **Preamble:** `G94` mm/min throughout, **no `G93`** inverse-time.
+- **Feed (D2):** new pure helper `klipper_feed(dX,dZ,dC,dB, inv_time_feed, wC,wB,
+  travel)`. `F = weighted_len · (1/planar_time)` in mm/min, over Klipper's own
+  metric (deg treated as mm 1:1). Weights `FEED_WEIGHT_C/B` default `1.0`, which
+  **preserves the planar move time exactly** → extrusion stays consistent;
+  weight `< 1` slows rotary-heavy moves. `TRAVEL_FEED` (20000) fallback when time
+  is undefined. There is no free weight that both tames rotary speed *and* keeps
+  time — the real velocity ceiling is firmware-side (Klipper `max_velocity` /
+  per-stepper), set in Phase 2.
+- Nozzle-offset comp / tilt clamp / C accumulation all reused unchanged.
+
+Verified: 18/18 unit tests (4 new on the feed helper); full pipeline run
+(`pi 3mm`, klipper config) → clean gcode, 0×`G93`, `G94` mm/min, all 390 moves
+carry a plain `F`, feeds ~8000 mm/min (sane). Config: `s4/config.yaml`
+`kinematics: "klipper"` + optional `FEED_WEIGHT_C/B`, `TRAVEL_FEED`.
 
 ### Phase 2 — Klipper firmware & config (gear2nd base + `polar_bc` kinematics)
 - Fork `gear2nd-droid/klipper` at a pinned `6axes_support` commit; stand it up on

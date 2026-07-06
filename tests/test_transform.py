@@ -6,6 +6,7 @@ from s4.transform import (
     cartesian_to_rtheta,
     format_gcode_line,
     kabsch_2d,
+    klipper_feed,
     tetrahedron_volume,
 )
 
@@ -126,3 +127,36 @@ def test_format_gcode_line_no_extrusion_no_feed():
     s = format_gcode_line(0.0, 0.0, 0.0, 0.0, None, None, kinematics="rtheta")
     assert "E" not in s
     assert "F" not in s
+
+
+def test_format_gcode_line_klipper_uses_rtheta_axes():
+    # "klipper" mode keeps logical R-theta axis letters (D1 = Option B).
+    s = format_gcode_line(45.0, 10.0, 5.0, 15.0, 0.5, 1234.0, kinematics="klipper")
+    assert s.startswith("G01 C")
+    assert " X" in s and " Z" in s and " B" in s
+    assert " Y" not in s  # not cartesian
+
+
+def test_klipper_feed_preserves_planar_time():
+    # F = length * inv_time_feed, and Klipper time = length / F = 1/inv_time_feed
+    # = planar_time, independent of how length splits across axes. Weight 1.0.
+    inv_feed = 1.0 / 0.002  # planar_time = 0.002 min for this segment
+    for dx, dz, dc, db in [(0.6, 0, 0, 0), (0, 0, 30, 0), (0.3, 0.1, 12, 4)]:
+        f = klipper_feed(dx, dz, dc, db, inv_feed, 1.0, 1.0, 20000.0)
+        length = np.sqrt(dx**2 + dz**2 + dc**2 + db**2)
+        assert np.isclose(length / f, 0.002, atol=1e-9)
+
+
+def test_klipper_feed_weight_slows_rotary():
+    # Weight < 1 shrinks the rotary contribution -> smaller F -> longer Klipper
+    # time (length metric unchanged firmware-side) -> slower rotary move.
+    inv_feed = 500.0
+    f_full = klipper_feed(0, 0, 30, 0, inv_feed, 1.0, 1.0, 20000.0)
+    f_slow = klipper_feed(0, 0, 30, 0, inv_feed, 0.5, 1.0, 20000.0)
+    assert f_slow < f_full
+
+
+def test_klipper_feed_zero_length_falls_back_to_travel():
+    assert klipper_feed(0, 0, 0, 0, 1000.0, 1.0, 1.0, 20000.0) == 20000.0
+    # undefined time (inv_feed None) also falls back
+    assert klipper_feed(1, 0, 0, 0, None, 1.0, 1.0, 20000.0) == 20000.0
