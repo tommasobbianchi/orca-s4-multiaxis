@@ -37,10 +37,31 @@ Board: Fly-E3-Pro-v3 (STM32, RRF 3.5), TMC2209, 24 V. Extruder BIQU H2, long noz
 - A second RRF mode (`topolar.g`, `M669 K7` polar) exists for his simpler radial
   slicer — **out of scope**, we only port the 4-axis mode.
 
-## Chosen route: naikymen `cartesian_abc` + slicer-side kinematics
+## Prior art — 4/5-axis Klipper (GitHub sweep, 2026-07)
 
-Klipper runs 4 **independent** steppers (the 4 physical motors); all Core-RΘ
-kinematics live in Stage C. Two design decisions, to be settled in Phase 0:
+| Project | What | Relevance |
+|---|---|---|
+| **[gear2nd-droid/klipper](https://github.com/gear2nd-droid/klipper)** `6axes_support` | Active 6-axis Klipper fork, Klipper 0.12 (2026-06). C kinematics `kin_corexybc.c`, `kin_trunnion_bc.c`, `kin_polar.c` (CoreXY/trunnion **+ B + C**). | **Best base** — 3-axis ceiling solved + rotary/tilt templates. |
+| **[gear2nd-droid/MageSlicer](https://github.com/gear2nd-droid/MageSlicer)** | NURBS multi-axis slicer (4+ axes) + MAGE 5-axis printer. | Proves toolchain; feed baked slicer-side (no G93). Alt to S4. |
+| **[naikymen/klipper-for-cnc](https://github.com/naikymen/klipper-for-cnc)** | `cartesian_abc` XYZABC, independent linear axes. | Simpler fallback; no coupling/rotary. |
+| **[XyrusB2010/XYmatics-E64](https://github.com/XyrusB2010/XYmatics-E64)** + Alpha | 5-axis Klipper mainboard (CM4+STM32F407, CAN) + CoreXY-BC printer. | Hardware ref; real corexybc machine. |
+| Open5x, RotBot | Duet/RRF, not Klipper. | Kinematics reference only. |
+
+## Chosen route: gear2nd-droid fork + a `polar_bc` kinematics
+
+Re-based from naikymen to **gear2nd-droid/klipper `6axes_support`**: it already
+extends Klipper's motion core past 3 axes and ships C kinematics for added B/C
+rotary+tilt axes. Our work is to write **one new kinematics, `polar_bc`**
+(`kin_polar_bc.c` + `polar_bc.py`), combining:
+- radial (X) + rotary (C) ← model on `kin_polar.c`
+- B tilt + the X/B CoreXY core-pair mixing ← model on `kin_corexybc.c` /
+  `kin_trunnion_bc.c`
+- independent Z.
+
+Pin a specific gear2nd commit (hard fork off mainline). Feed still has **no
+G93** in this fork either — it stays slicer-side (Stage C), as MageSlicer does.
+
+Two design decisions, to be settled in Phase 0:
 
 **D1 — coupling location (motor-space vs coupled kinematic).**
 - *Option A (motor-space, least Klipper code):* Stage C emits belt-motor targets
@@ -80,12 +101,15 @@ become the two core motors instead.)
 - Reuse the existing 42 mm nozzle-offset comp, tilt clamp, C accumulation.
 - Unit tests for the transform + feed conversion.
 
-### Phase 2 — Klipper firmware & config
-- Stand up `naikymen/klipper-for-cnc` on a Klipper-capable MCU (the Fly-E3-Pro
-  can run Klipper, or use an existing Klipper board). Confirm `cartesian_abc`.
-- Config: 4 steppers (steps/mm, currents, limits), sensorless homing on the core
-  pair (the tricky bit), Z probe, extruder, TMC2209.
-- If D1=Option B: apply the coupled-kinematic patch.
+### Phase 2 — Klipper firmware & config (gear2nd base + `polar_bc` kinematics)
+- Fork `gear2nd-droid/klipper` at a pinned `6axes_support` commit; stand it up on
+  a Klipper-capable MCU (Fly-E3-Pro can run Klipper, or use an existing board).
+- Write `polar_bc` (`kin_polar_bc.c` + `klippy/kinematics/polar_bc.py`) modeled on
+  `kin_polar.c` (radial+C) + `kin_corexybc.c`/`kin_trunnion_bc.c` (tilt + core
+  pair). This is the D1=Option B "custom kinematics" — homing works on logical
+  radial/tilt axes.
+- Config: steppers (steps/mm, currents, limits), sensorless homing on the core
+  pair, Z probe, extruder, TMC2209.
 - Replicate the RRF homing sequence (X-high/B-high sensorless, C=G92 home, Z probe).
 
 ### Phase 3 — Bring-up & validation
@@ -107,7 +131,11 @@ become the two core motors instead.)
    near the rotary axis (small r); tune D2 weight, may need slicer-side clamping.
 4. **Board Klipper compatibility** — confirm the Fly board flashes Klipper, or
    pick a board.
-5. **naikymen fork drift** — pin a commit; it's a hard fork off mainline.
+5. **gear2nd fork drift** — pin a commit; it's a hard fork off mainline, and the
+   author explicitly declines support ("do not use unless you can write your own
+   kinematics"). We are writing our own — but expect no hand-holding.
+6. **`polar_bc` C kinematics correctness** — new C code; validate the forward/
+   inverse against the RRF reference and bench (ties to risk 1).
 
 ## Fallback
 If Klipper bring-up stalls, his RRF configs run the S4 output **today** on a
