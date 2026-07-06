@@ -1,0 +1,9 @@
+{
+    "type": "machine",
+    "name": "MyKlipper 0.4 nozzle",
+    "from": "User",
+    "instantiation": "true",
+    "inherits": "MyKlipper 0.4 nozzle",
+    "printable_area": ["-125x-125", "125x-125", "125x125", "-125x125"],
+    "layer_change_gcode": ";AFTER_LAYER_CHANGE\n;[layer_z]\nG92 E0\n"
+}

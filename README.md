@@ -63,23 +63,25 @@ Set these top-level keys in `config.yaml` (see the shipped example):
 
 ### Coordinate frame (bed_center)
 
-S4 slices with the part at **XY origin** (the rotary axis). OrcaSlicer beds are
-**corner-origin**, so the pipeline translates the deformed mesh onto the bed by
-`bed_center` to slice, then reframes the planar gcode's X/Y back to origin before
-Stage C. Set `bed_center` to the bed center of your `orca_config` machine (e.g. a
-256 mm BBL bed → `[128, 128]`). For a genuine center-origin machine profile, set
-`bed_center: null`.
+S4 slices with the part at **XY origin** (the rotary axis). The shipped machine
+profile (`s4/profiles/S4_klipper_centered.json`) is therefore a **center-origin**
+250 mm bed, so the part slices as-placed and `bed_center` is `null` — no reframe.
 
-The pipeline also trims the slicer's start/end gcode (purge, calibration) down to
-the model toolpath — Stage C rebuilds its own preamble, and those moves would
-otherwise be mapped into spurious extrusions.
+For a **corner-origin** bed instead, set `bed_center` to that bed's center (e.g.
+a 256 mm BBL bed → `[128, 128]`): the pipeline then translates the mesh onto the
+bed to slice and shifts the planar gcode's X/Y back to origin for Stage C.
+
+Either way the pipeline trims the slicer's start/end gcode (purge, calibration)
+down to the model toolpath — Stage C rebuilds its own preamble, and those moves
+would otherwise be mapped into spurious extrusions.
 
 **Note on Orca CLI profiles:** OrcaSlicer's headless `--load-settings` only accepts
-a machine+process pair whose compatibility its CLI recognizes (empirically, stock
-Bambu profiles slice; several stock Marlin/Voron pairs return exit -17 "not
-compatible"). Until a compatible minimal-Marlin profile is found, the shipped
-config uses a stock Bambu profile purely as a planar-slice engine; the bed reframe
-makes the output machine-agnostic.
+a machine+process pair whose compatibility its CLI recognizes. Empirically, stock
+**Klipper** (`Generic Klipper Printer`) and **Bambu** pairs slice; stock **Marlin**
+and **Voron** pairs return exit `-17` "not compatible". The shipped profile inherits
+the Generic Klipper Printer, overrides the bed to center-origin, and adds `G92 E0`
+to `layer_change_gcode` (Klipper relative-E requires it). Point `orca_config` at
+your own printer's profile when you have one.
 
 ### Planar-slice constraints (soft-verified)
 

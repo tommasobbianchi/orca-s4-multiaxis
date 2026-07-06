@@ -30,16 +30,18 @@ transform:
 
 # --- Stage B: external slicer ---
 # Native OrcaSlicer 2.4.0-dev binary (no AppImage/FUSE); full profile tree lives
-# under the same repo's resources/profiles. Verified headless-slicing 2026-07-06.
+# under orca-pr12998/resources/profiles. Verified headless-slicing 2026-07-06.
 orca_binary: "/home/tommaso/projects/orca-pr12998/build/src/orca-slicer"
-# machine + process, ";"-joined -> --load-settings. Stock BBL X1C triple, verified
-# to slice headless (exit 0). Swap for the real machine/process once it exists.
-orca_config: "/home/tommaso/projects/orca-pr12998/resources/profiles/BBL/machine/Bambu Lab X1 Carbon 0.4 nozzle.json;/home/tommaso/projects/orca-pr12998/resources/profiles/BBL/process/0.20mm Standard @BBL X1C.json"
+# machine + process, ";"-joined -> --load-settings.
+# Machine = in-repo Klipper profile (s4/profiles/S4_klipper_centered.json): a
+# CENTER-ORIGIN 250mm bed inheriting the stock "Generic Klipper Printer", so the
+# origin-centered part slices as-placed and no gcode reframe is needed. Klipper
+# profiles pass Orca's headless --load-settings compat check (stock Marlin/Voron
+# pairs return exit -17 "not compatible"; Klipper and Bambu do not).
+orca_config: "/home/tommaso/projects/Orca-s4/S4_Slicer/s4/profiles/S4_klipper_centered.json;/home/tommaso/projects/orca-pr12998/resources/profiles/Custom/process/0.20mm Standard @MyKlipper.json"
 # filament -> --load-filaments (separate flag, NOT part of orca_config)
 orca_filament: "/home/tommaso/projects/orca-pr12998/resources/profiles/OrcaFilamentLibrary/filament/Generic PLA @System.json"
-# S4 slices with the part at XY origin (= rotary axis); Orca beds are corner-
-# origin, so the deformed mesh is translated onto the bed for slicing, then the
-# planar gcode is reframed back to origin for Stage C. Set to the bed center (mm)
-# of the machine profile above (BBL 256mm bed -> [128, 128]). Null = no shift
-# (only correct for a genuine center-origin bed).
-bed_center: [128, 128]
+# Center-origin bed above -> part already at the rotary axis, no reframe. Set to
+# [x, y] mm only for a corner-origin bed (then the mesh is translated onto the
+# bed to slice and the planar gcode is shifted back to origin for Stage C).
+bed_center: null
