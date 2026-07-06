@@ -50,18 +50,45 @@ Options:
 | `--config` | Path to `config.yaml` (default: built-in defaults) |
 | `--workdir` | Working directory for intermediate files (default: parent of `--output`) |
 
-### OrcaSlicer profile requirements
+### OrcaSlicer binary + profiles
 
-S4's belt-printer kinematics require a planar gcode with these constraints.
-Your OrcaSlicer profile **must** enforce:
+Set these top-level keys in `config.yaml` (see the shipped example):
 
-- **Origin at bed center** (`printable_area` / origin 0,0 at center)
+- `orca_binary` — path to an OrcaSlicer binary. A native build (`build/src/orca-slicer`)
+  avoids AppImage/FUSE issues.
+- `orca_config` — `"machine.json;process.json"` (`;`-joined) passed to `--load-settings`.
+- `orca_filament` — filament json passed to `--load-filaments` (a **separate** flag;
+  putting the filament inside `orca_config` makes Orca exit 206).
+- `bed_center` — `[x, y]` mm, the bed center of that machine profile.
+
+### Coordinate frame (bed_center)
+
+S4 slices with the part at **XY origin** (the rotary axis). OrcaSlicer beds are
+**corner-origin**, so the pipeline translates the deformed mesh onto the bed by
+`bed_center` to slice, then reframes the planar gcode's X/Y back to origin before
+Stage C. Set `bed_center` to the bed center of your `orca_config` machine (e.g. a
+256 mm BBL bed → `[128, 128]`). For a genuine center-origin machine profile, set
+`bed_center: null`.
+
+The pipeline also trims the slicer's start/end gcode (purge, calibration) down to
+the model toolpath — Stage C rebuilds its own preamble, and those moves would
+otherwise be mapped into spurious extrusions.
+
+**Note on Orca CLI profiles:** OrcaSlicer's headless `--load-settings` only accepts
+a machine+process pair whose compatibility its CLI recognizes (empirically, stock
+Bambu profiles slice; several stock Marlin/Voron pairs return exit -17 "not
+compatible"). Until a compatible minimal-Marlin profile is found, the shipped
+config uses a stock Bambu profile purely as a planar-slice engine; the bed reframe
+makes the output machine-agnostic.
+
+### Planar-slice constraints (soft-verified)
+
+S4's kinematics require the planar gcode to have:
+
 - **No Z-hop** (z hop when retracting = 0; disable retract lift)
-- **Relative extrusion** (`M83`; absolute extrusion `M82` will break the inverse-transform)
+- **Relative extrusion** (`M83`; absolute `M82` breaks the inverse-transform)
 
-The pipeline runs a soft verification on the produced gcode and logs warnings
-if any of these are violated, but does not halt — it is your responsibility
-to use a correct profile.
+The pipeline logs warnings if these are violated but does not halt.
 
 ### Folder watcher
 

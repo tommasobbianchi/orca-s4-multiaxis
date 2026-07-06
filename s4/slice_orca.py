@@ -34,12 +34,87 @@ def detect_orca_binary(configured=None):
     )
 
 
+def _translate_stl(src, dst, dx, dy):
+    """Rigid XY translation of a mesh (to place an origin-centered part onto a
+    corner-origin bed). pyvista is already a Stage-A dependency."""
+    import pyvista as pv
+    m = pv.read(src)
+    m.points[:, 0] += dx
+    m.points[:, 1] += dy
+    m.save(dst)
+
+
+def _trim_to_toolpath(gcode_path):
+    """Keep only the model toolpath, dropping the slicer's start-gcode (nozzle
+    purge, bed leveling, calibration) and end-gcode. Stage C rebuilds its own
+    preamble; left in, those preamble moves get mapped through the tet field into
+    spurious extrusions, and they also bloat Stage C's per-point cell lookup.
+    Boundary = OrcaSlicer's first '; CHANGE_LAYER' .. '; EXECUTABLE_BLOCK_END'.
+    ponytail: markers absent (non-Orca gcode) -> leave the file unchanged."""
+    lines = Path(gcode_path).read_text().splitlines()
+    start = end = None
+    for i, ln in enumerate(lines):
+        s = ln.strip()
+        if start is None and s == "; CHANGE_LAYER":
+            start = i
+        elif s == "; EXECUTABLE_BLOCK_END":
+            end = i
+            break
+    if start is None:
+        return
+    body = lines[start:end] if end is not None else lines[start:]
+    Path(gcode_path).write_text("\n".join(body) + "\n")
+
+
+def _reframe_gcode(gcode_path, dx, dy):
+    """Subtract (dx, dy) from absolute X/Y on G0/G1 moves, undoing the bed
+    translation so the toolpath is back in the part frame (rotary axis at 0,0)
+    that Stage C requires. Orca's start/end gcode is discarded by Stage C, so a
+    blanket shift of every move is safe.
+    ponytail: assumes absolute XYZ (G90) and no arc moves (G2/G3, off by default
+    in Orca). If arc fitting is ever enabled, reframe I/J too."""
+    out = []
+    for line in Path(gcode_path).read_text().splitlines():
+        head = line.lstrip()[:4].upper()
+        if head.startswith(("G1 ", "G0 ", "G01 ", "G00 ")):
+            parts = line.split()
+            for i, p in enumerate(parts):
+                if len(p) > 1 and p[0] in "Xx":
+                    try:
+                        parts[i] = f"X{float(p[1:]) - dx:.5f}"
+                    except ValueError:
+                        pass
+                elif len(p) > 1 and p[0] in "Yy":
+                    try:
+                        parts[i] = f"Y{float(p[1:]) - dy:.5f}"
+                    except ValueError:
+                        pass
+            line = " ".join(parts)
+        out.append(line)
+    Path(gcode_path).write_text("\n".join(out) + "\n")
+
+
 def slice_stl(stl_path, out_dir, orca_binary, orca_config=None,
-              extra_args=None, timeout=600):
+              orca_filament=None, bed_center=None, extra_args=None, timeout=600):
     os.makedirs(out_dir, exist_ok=True)
+
+    # S4 places the part at XY origin; Orca beds are corner-origin. Translate the
+    # part onto the bed to slice, remember the shift to undo on the gcode.
+    dx = dy = 0.0
+    if bed_center:
+        dx, dy = float(bed_center[0]), float(bed_center[1])
+        onbed = str(Path(out_dir) / (Path(stl_path).stem + "_onbed.stl"))
+        _translate_stl(stl_path, onbed, dx, dy)
+        stl_path = onbed
+
     args = [orca_binary] + ORCA_SLICE_ARGS
     if orca_config:
+        # machine + process, ";"-joined (Orca CLI convention).
         args += ["--load-settings", orca_config]
+    # Filament is loaded via its OWN flag, NOT inside --load-settings. Passing it
+    # in --load-settings makes Orca exit 206 with an empty/unsatisfiable config.
+    if orca_filament:
+        args += ["--load-filaments", orca_filament]
     if extra_args:
         args += extra_args
     args += ["--outputdir", out_dir, stl_path]
@@ -84,7 +159,13 @@ def slice_stl(stl_path, out_dir, orca_binary, orca_config=None,
             + f"\nstderr tail:\n{stderr_tail}"
         )
 
-    return str(max(fresh, key=lambda p: p.stat().st_mtime))
+    gcode = str(max(fresh, key=lambda p: p.stat().st_mtime))
+    # Drop slicer preamble/postamble first (smaller file -> faster reframe), then
+    # move the toolpath back to the part frame (rotary axis at 0,0) for Stage C.
+    _trim_to_toolpath(gcode)
+    if bed_center:
+        _reframe_gcode(gcode, dx, dy)
+    return gcode
 
 
 def verify_planar_constraints(gcode_path):

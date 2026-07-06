@@ -28,6 +28,18 @@ transform:
   MAX_EXTRUSION_MULTIPLIER: 10
   kinematics: "rtheta"            # "rtheta" or "cartesian_b"
 
-# --- Stage B: external slicer (for the NEXT task) ---
-orca_binary: "/home/tommaso/projects/orca-cad-primitives/build/Snapmaker_Orca_Linux_V2.3.4.AppImage"
-orca_config: ""                   # placeholder, set in the next task
+# --- Stage B: external slicer ---
+# Native OrcaSlicer 2.4.0-dev binary (no AppImage/FUSE); full profile tree lives
+# under the same repo's resources/profiles. Verified headless-slicing 2026-07-06.
+orca_binary: "/home/tommaso/projects/orca-pr12998/build/src/orca-slicer"
+# machine + process, ";"-joined -> --load-settings. Stock BBL X1C triple, verified
+# to slice headless (exit 0). Swap for the real machine/process once it exists.
+orca_config: "/home/tommaso/projects/orca-pr12998/resources/profiles/BBL/machine/Bambu Lab X1 Carbon 0.4 nozzle.json;/home/tommaso/projects/orca-pr12998/resources/profiles/BBL/process/0.20mm Standard @BBL X1C.json"
+# filament -> --load-filaments (separate flag, NOT part of orca_config)
+orca_filament: "/home/tommaso/projects/orca-pr12998/resources/profiles/OrcaFilamentLibrary/filament/Generic PLA @System.json"
+# S4 slices with the part at XY origin (= rotary axis); Orca beds are corner-
+# origin, so the deformed mesh is translated onto the bed for slicing, then the
+# planar gcode is reframed back to origin for Stage C. Set to the bed center (mm)
+# of the machine profile above (BBL 256mm bed -> [128, 128]). Null = no shift
+# (only correct for a genuine center-origin bed).
+bed_center: [128, 128]

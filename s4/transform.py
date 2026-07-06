@@ -187,7 +187,12 @@ def transform_gcode(planar_gcode_path, deformed_tet, fields, params=None):
 
     with open(planar_gcode_path, "r") as fh:
         for line_text in fh.readlines():
-            line = Line(line_text)
+            try:
+                line = Line(line_text)
+            except Exception:
+                # Slicer-proprietary lines pygcode can't parse (e.g. Bambu's
+                # "M1006 W" buzzer macro). Never toolpath moves — skip them.
+                continue
             if not line.block.gcodes:
                 continue
             for gcode in sorted(line.block.gcodes):

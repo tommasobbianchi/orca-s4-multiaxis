@@ -30,6 +30,8 @@ def load_config(path):
     misc = {
         "orca_binary": raw.get("orca_binary"),
         "orca_config": raw.get("orca_config") or None,
+        "orca_filament": raw.get("orca_filament") or None,
+        "bed_center": raw.get("bed_center") or None,
     }
 
     return deform_params, transform_params, misc
@@ -53,9 +55,13 @@ def run(stl_path, out_gcode, config_path=None, workdir=None, orca_binary=None):
     # Explicit orca_binary arg (e.g. CLI --orca-binary) overrides the config.
     resolved_binary = detect_orca_binary(orca_binary or misc.get("orca_binary"))
     orca_config = misc.get("orca_config") or None
-    if orca_config and not os.path.isfile(orca_config):
-        log.warning("orca_config %s not found, slicing without a profile.", orca_config)
+    if orca_config and not all(os.path.isfile(p) for p in orca_config.split(";")):
+        log.warning("orca_config %s not fully found, slicing without a profile.", orca_config)
         orca_config = None
+    orca_filament = misc.get("orca_filament") or None
+    if orca_filament and not os.path.isfile(orca_filament):
+        log.warning("orca_filament %s not found, slicing without a filament.", orca_filament)
+        orca_filament = None
 
     t0 = time.time()
     log.info("Stage A: deforming %s ...", stl_path)
@@ -67,7 +73,8 @@ def run(stl_path, out_gcode, config_path=None, workdir=None, orca_binary=None):
 
     t1 = time.time()
     log.info("Stage B: slicing deformed STL ...")
-    planar = slice_stl(deformed_stl, str(workdir), resolved_binary, orca_config)
+    planar = slice_stl(deformed_stl, str(workdir), resolved_binary, orca_config,
+                       orca_filament, bed_center=misc.get("bed_center"))
     log.info("Stage B done (%.1fs), planar gcode at %s",
              time.time() - t1, planar)
 
